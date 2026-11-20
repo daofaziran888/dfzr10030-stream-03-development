@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.seed import SEED_ROWS
+from app.takeover_seed import TAKEOVER_SEED_ROWS
 
 
 class Store:
@@ -14,9 +15,21 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 接管校验的私有表（以 _ 开头），不参与业务模块列表与概览统计。
+        self._tables.update({
+            name: [dict(row) for row in rows] for name, rows in TAKEOVER_SEED_ROWS.items()
+        })
+
+    def reset(self) -> None:
+        """恢复到示例数据：重启服务或测试隔离时使用。"""
+        self._tables.clear()
+        for name, rows in SEED_ROWS.items():
+            self._tables[name] = [dict(row) for row in rows]
+        for name, rows in TAKEOVER_SEED_ROWS.items():
+            self._tables[name] = [dict(row) for row in rows]
 
     def module_names(self) -> list[str]:
-        return sorted(self._tables)
+        return sorted(name for name in self._tables if not name.startswith("_"))
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])

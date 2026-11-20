@@ -15,6 +15,11 @@ from app.fixtures import (
     PARTITION_STATS, EVENT_ROUTES,
 )
 from app.store import store
+from app.services.source_takeover import SourceTakeoverService
+
+
+def _takeover() -> SourceTakeoverService:
+    return SourceTakeoverService()
 
 
 def _to_float(v: Any) -> float:
@@ -57,6 +62,46 @@ def run_source_cdc_pipeline() -> dict:
         "sources": {k: dict(v) for k, v in src_stats.items()},
     }
     _wr("source_cdc_transform", {"source": ["source_binding", "cdc_task"], "target": "stream_transform", "payload": result})
+    return result
+
+
+# Pipeline 1b: source_takeover -> cdc_task -> 交接清单回写
+def run_takeover_resume_pipeline() -> dict:
+    """按接管位点批次清单实际续读事件，把交付结果回写到交接清单。
+
+    只处理尚未在源端列表里声明的批次；已确认的批次不会被重新续读，因此
+    重试不会把同一笔业务变更交给 CDC 两次，有效数据覆盖范围也不会扩大。
+    """
+    service = _takeover()
+    resumed: list[dict] = []
+    skipped: list[dict] = []
+    for batch in service.list_batches():
+        if batch.get("确认位点") is not None:
+            skipped.append({"批次编号": batch["批次编号"], "原因": "已确认交接"})
+            continue
+        payload, message = service.resume(batch["id"])
+        if payload is None:
+            skipped.append({"批次编号": batch["批次编号"], "原因": message})
+            continue
+        resumed.append({
+            "批次编号": payload["批次编号"],
+            "源端编号": payload["源端编号"],
+            "表名": payload["表名"],
+            "续读起点": payload["续读起点"],
+            "续读上限": payload["续读上限"],
+            "交付变更": [event["变更编号"] for event in payload["事件"]],
+            "跳过重复": [event["变更编号"] for event in payload["跳过重复"]],
+        })
+
+    result = {
+        "resumed_batches": len(resumed),
+        "skipped_batches": len(skipped),
+        "delivered_events": sum(len(item["交付变更"]) for item in resumed),
+        "batches": resumed,
+        "skipped": skipped,
+        "cursors": service.list_cursors(),
+    }
+    _wr("source_takeover_cdc", {"source": ["source_takeover", "cdc_task"], "target": "_takeover_batches", "payload": result})
     return result
 
 

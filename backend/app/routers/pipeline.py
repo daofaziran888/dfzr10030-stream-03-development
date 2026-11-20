@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from app.services.pipeline_orchestrator import (
     run_all_pipelines, list_pipeline_results,
-    run_source_cdc_pipeline, run_window_metric_pipeline,
+    run_source_cdc_pipeline, run_takeover_resume_pipeline, run_window_metric_pipeline,
     run_rule_router_pipeline, run_metric_sink_pipeline,
     run_quality_scan, run_partition_backpressure_pipeline,
     run_checkpoint_state_pipeline,
@@ -27,6 +27,11 @@ def list_results() -> dict:
 @router.post("/source-cdc")
 def trigger_source_cdc() -> dict:
     return {"ok": True, "result": run_source_cdc_pipeline()}
+
+
+@router.post("/source-takeover")
+def trigger_source_takeover() -> dict:
+    return {"ok": True, "result": run_takeover_resume_pipeline()}
 
 
 @router.post("/window-metric")
